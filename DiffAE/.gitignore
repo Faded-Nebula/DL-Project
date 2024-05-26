@@ -1,0 +1,8 @@
+temp
+__pycache__
+generated
+latent_infer
+datasets
+checkpoints
+
+.ipynb_checkpoints/
