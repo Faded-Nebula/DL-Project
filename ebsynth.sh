@@ -1,6 +1,9 @@
 export PATH=ebsynth/bin:$PATH
 
-ebsynth -style ./raw_frames/frame_1.png \
--guide ./raw_frames/frame_2.png ./refined_frames/frame_2.png -weight 2.0 \
--guide raw_depth.png refined_depth.png -weight 1.5 \
--output output2.png
+ebsynth -style bin/raw_frames/frame_16.png \
+-guide bin/raw_frames/frame_4.png bin/refined_key_frames/frame_4.png -weight 2.5 \
+-guide bin/gray_raw_key_frames/frame_4.png bin/gray_refined_key_frames/frame_4.png -weight 1.5 \
+-output output4.png \
+-patchsize 3 \
+-searchvoteiters 20 \
+#-extrapass3x3 

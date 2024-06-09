@@ -2,6 +2,7 @@ from PIL import Image
 import os
 import imageio
 import re
+import glob
 
 def get_image_resolution(image_path):
     with Image.open(image_path) as img:
@@ -16,6 +17,10 @@ def resize_image(image_path, output_path, new_size=(1024, 1024)):
 def key_frame_extraction(input_dir="bin/raw_frames", output_dir="bin/key_frames", key_frame_indices=[4, 8, 12, 16]):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    else:
+        files = glob.glob(os.path.join(output_dir, '*'))
+        for f in files:
+            os.remove(f)
     for i in key_frame_indices:
         img_path = os.path.join(input_dir, f"frame_{i}.png")
         img = Image.open(img_path)
@@ -47,7 +52,7 @@ def images_to_gif(input_dir, output_gif):
     for i, filename in enumerate(files):
         img_path = os.path.join(input_dir, filename)
         images.append(imageio.imread(img_path))
-    imageio.mimsave(output_gif, images, duration=1.5)
+    imageio.mimsave(output_gif, images, duration=1)
 
 def gif_to_images(input_gif, output_dir):
     if not os.path.exists(output_dir):
@@ -75,3 +80,9 @@ def split_image(image_path, output_dir, grid_size=(2, 2),frame_indices=[4, 8, 12
             cropped_img.save(f"{output_dir}/frame_{frame_indices[k]}.png")
             resize_image(f"{output_dir}/frame_{frame_indices[k]}.png", f"{output_dir}/frame_{frame_indices[k]}.png", (1024, 1024))
             k +=1
+
+
+def convert_to_grayscale(input_img, output_img):
+    image = Image.open(input_img)
+    grayscale_image = image.convert("L")
+    grayscale_image.save(output_img)
