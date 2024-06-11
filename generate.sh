@@ -1,3 +1,4 @@
 python model.py --mode generate \
---video_prompt "A huge wave on the sea" \
---image_prompt "4k, a huge wave on the sea, detailed, masterpiece"
+--video_prompt "a big wave on the sea" \
+--image_prompt "a big wave on the sea, oil painting, detailed, masterpiece, heavy strokes, impressionist"
+#--lora /root/DLProject/lora/vincent_van_gogh_xl.safetensors \
