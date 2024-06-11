@@ -57,12 +57,16 @@ def images_to_gif(input_dir, output_gif):
 def gif_to_images(input_gif, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    else:
+        files = glob.glob(os.path.join(output_dir, '*'))
+        for f in files:
+            os.remove(f)
     with imageio.get_reader(input_gif) as reader:
         for i, img in enumerate(reader):
             imageio.imsave(os.path.join(output_dir, f"frame_{i + 1}.png"), img)
 
 def split_image(image_path, output_dir, grid_size=(2, 2),frame_indices=[4, 8, 12, 16]):
-    assert len(frame_indices) == grid_size[0] * grid_size[1]
+    assert len(frame_indices) <= grid_size[0] * grid_size[1]
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     img = Image.open(image_path)
@@ -72,6 +76,10 @@ def split_image(image_path, output_dir, grid_size=(2, 2),frame_indices=[4, 8, 12
     k = 0
     for j in range(grid_size[1]):
         for i in range(grid_size[0]):
+
+            if k >= len(frame_indices):
+                break
+
             left = i * grid_width
             upper = j * grid_height
             right = (i + 1) * grid_width
