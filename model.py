@@ -4,12 +4,13 @@ import subprocess
 import re
 import glob
 import gc
+import cv2
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from transformers import pipeline
-from diffusers import AnimateDiffPipeline, MotionAdapter, EulerDiscreteScheduler, AutoPipelineForImage2Image, AutoPipelineForText2Image
+from diffusers import AnimateDiffPipeline, MotionAdapter, EulerDiscreteScheduler, AutoPipelineForImage2Image, AutoPipelineForText2Image, ControlNetModel,StableDiffusionXLControlNetPipeline, StableDiffusionXLControlNetImg2ImgPipeline, AutoencoderKL
 from diffusers.utils import export_to_gif, load_image
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
@@ -52,7 +53,8 @@ def key_frame_img2img(input_dir="bin/key_frames",
                       lora=None,
                       prompt="4k, 1girl, dancing, realistic, clear face, high quality", 
                       negative_prompt="bad anatomy, poorly drawn hands, extra limbs, blur, poorly drawn hands, poorly drawn feet, poorly drawn face",
-                      strength=0.3, guidance_scale=20):
+                      strength=0.3, guidance_scale=20,
+                      control_net=False):
     
     num_key_frames = len(key_frame_indices)
     if num_key_frames == 1:
@@ -62,21 +64,68 @@ def key_frame_img2img(input_dir="bin/key_frames",
         stitch_images(input_dir=input_dir, output_image="bin/key_frames.png",grid_size=(2, 2))
         resize_image("bin/key_frames.png", "bin/key_frames.png", (2048, 2048))
     
-    
+    if control_net:
+        print("ControlNet is enabled.")
 
-    pipeline_text2image = AutoPipelineForText2Image.from_pretrained(
-        "stable-diffusion-xl-base-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
+        init_image = load_image("bin/key_frames.png")
+
+        controlnet_conditioning_scale = 0.5  # recommended for good generalization
+
+        controlnet = ControlNetModel.from_pretrained(
+            "controlnet-canny-sdxl-1.0",
+            torch_dtype=torch.float16
         ).to("cuda")
-    # use from_pipe to avoid consuming additional memory when loading a checkpoint
-    pipeline = AutoPipelineForImage2Image.from_pipe(pipeline_text2image).to("cuda")
-    #pipeline = AutoPipelineForImage2Image.from_pretrained(
-    #    "stable-diffusion-xl-refiner-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
-    #).to("cuda")
-    if lora is not None:
-        pipeline.load_lora_weights(lora)
-    init_image = load_image("bin/key_frames.png")
-    image = pipeline(prompt, negative_prompt=negative_prompt,image=init_image, strength=strength, guidance_scale=guidance_scale).images[0]
-    image.save("bin/refined_key_frames.png")
+        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16).to("cuda")
+        pipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
+        "stabilityai/stable-diffusion-xl-base-1.0",
+            controlnet=controlnet,
+            vae=vae,
+            variant="fp16",
+            use_safetensors=True,
+            torch_dtype=torch.float16,
+        ).to("cuda")
+        if lora is not None:
+            print("Loading lora weights...")
+            pipeline.load_lora_weights(lora)
+            print("Loaded lora weights successfully.")
+
+
+        image = np.array(init_image)
+        image = cv2.Canny(image, 100, 200)
+        image = image[:, :, None]
+        image = np.concatenate([image, image, image], axis=2)
+        image = Image.fromarray(image)
+
+        images = pipeline(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            #image=init_image,
+            #control_image=image,
+            image=image,
+            strength=0.3,
+            num_inference_steps=50,
+            controlnet_conditioning_scale=controlnet_conditioning_scale,
+        ).images
+
+        images[0].save("bin/refined_key_frames.png")
+
+    else:
+        pipeline_text2image = AutoPipelineForText2Image.from_pretrained(
+            "stable-diffusion-xl-base-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
+            ).to("cuda")
+        # use from_pipe to avoid consuming additional memory when loading a checkpoint
+        pipeline = AutoPipelineForImage2Image.from_pipe(pipeline_text2image).to("cuda")
+        #pipeline = AutoPipelineForImage2Image.from_pretrained(
+        #    "stable-diffusion-xl-refiner-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
+        #).to("cuda")
+        if lora is not None:
+            print("Loading lora weights...")
+            pipeline.load_lora_weights(lora)
+            print("Loaded lora weights successfully.")
+
+        init_image = load_image("bin/key_frames.png")
+        image = pipeline(prompt, negative_prompt=negative_prompt,image=init_image, strength=strength, guidance_scale=guidance_scale).images[0]
+        image.save("bin/refined_key_frames.png")
     files = glob.glob(os.path.join("bin/refined_key_frames", '*'))
     for f in files:
         os.remove(f)
@@ -130,7 +179,7 @@ def ebsynth_frame(input_dir="bin/raw_frames", output_dir="bin/refined_frames", s
         gray_guide = f"-guide {os.path.join(gray_input_dir, nearest_key_frame)} {os.path.join(gray_input_dir, frame)} -weight {1.5} "
         command += guide
         command += gray_guide 
-        command += f"-output {output_path} -patchsize 7 -searchvoteiters 10 -extrapass3x3"
+        command += f"-output {output_path} -extrapass3x3"
 
         process = subprocess.Popen(command, shell=True, executable="/bin/bash")
         output, error = process.communicate()
@@ -188,7 +237,8 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, required=True, help='Mode for the video. Options: [import, generate]')
     parser.add_argument('--video_path', type=str, help='Path for the video if it is import mode.')
     parser.add_argument('--video_prompt', type=str, help='Prompt for the video if it is generate mode.')
-    parser.add_argument('--lora', type=str, help='Enter the correct path to the lora weight.')
+    parser.add_argument('--lora', type=str, help='Path to the lora weight.')
+    parser.add_argument('--controlnet',action='store_true', help='To enable controlnet, add flag --controlnet. Now we do not support arbitrary controlnet.')
     parser.add_argument('--image_prompt', type=str, required=True, help='Prompt for the img2img.')
     parser.add_argument('--key_frame', nargs='+', type=int, help='Enter the list of key frames.')
     args = parser.parse_args()
@@ -198,6 +248,7 @@ if __name__ == "__main__":
         import_video(input_gif=args.video_path, frame_dir="bin/raw_frames")
         print("Imported video successfully.")
         if args.video_path is None:
+            print("Please enter the correect video path.")
             parser.print_help()
             exit(1)
         if args.key_frame is not None:
@@ -206,33 +257,39 @@ if __name__ == "__main__":
             interval = len(os.listdir("bin/raw_frames")) // 4
             key_frame_indices = [interval, 2 * interval, 3 * interval, 4 * interval]
         if len(key_frame_indices) > 4:
+            print("Too much key frames are now not supported. Please take at most 4 key frames.")
             parser.print_help()
             exit(1)
 
     elif args.mode == "generate":
         print("Generating video...")
         generate_video(prompt=args.video_prompt, output_gif="bin/raw.gif", frame_dir="bin/raw_frames")
+        print("Generated video successfully.")
         if args.key_frame is not None:
             key_frame_indices = args.key_frame
         else:
             key_frame_indices = [4]
         if len(key_frame_indices) > 4:
+            print("Too much key frames are now not supported. Please take at most 4 key frames.")
             parser.print_help()
             exit(1)
 
-        print("Generated video successfully.")
         if args.video_prompt is None:
+            print("Please set the video prompt.")
             parser.print_help()
             exit(1)
     else:
+        print("Please set the correct mode.")
         parser.print_help()
         exit(1)
 
     if args.image_prompt is None:
+        print("Please set the image prompt.")
         parser.print_help()
         exit(1)
 
     if args.lora is not None and os.path.exists(args.lora) == False:
+        print("The target lora weight does not exist.")
         parser.print_help()
         exit(1)
 
@@ -248,14 +305,17 @@ if __name__ == "__main__":
                         key_frame_indices=key_frame_indices,
                         prompt=args.image_prompt,
                         negative_prompt="bad anatomy, poorly drawn hands, extra limbs",
-                        strength=0.3, guidance_scale=20)
+                        strength=0.3, guidance_scale=20,
+                        control_net=args.controlnet)
     else:
         print("Running img2img with lora...")
         key_frame_img2img(input_dir="bin/key_frames",
                         key_frame_indices=key_frame_indices,
                         prompt=args.image_prompt,
                         negative_prompt="bad anatomy, poorly drawn hands, extra limbs",
-                        strength=0.3, guidance_scale=20)
+                        strength=0.3, guidance_scale=20,
+                        control_net=args.controlnet,
+                        lora=args.lora)
     print("Running img2img successfully.")
     
     print("Running ebsynth...")
